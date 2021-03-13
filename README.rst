@@ -35,3 +35,18 @@ Depending on your editor, the configuration (found in a file called mypy-ls.cfg 
 	"live_mode": True,
 	"strict": False
     }
+
+``dmypy`` (default is False) executes via `dmypy run` rather than `mypy`.
+
+This uses the `dmypy` daemon and may dramatically improve the responsiveness of the `pyls` server.
+
+Depending on your editor, the configuration (found in a file called mypy-ls.cfg in your workspace or a parent directory) should be roughly like this:
+
+::
+
+    {
+	"enabled": True,
+	"live_mode": False,
+	"dmypy": True,
+	"strict": False
+    }
