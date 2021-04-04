@@ -32,7 +32,11 @@ tmpFile: Optional[IO[str]] = None
 # so store a cache of last diagnostics for each file a-la the pylint plugin,
 # so we can return some potentially-stale diagnostics.
 # https://github.com/palantir/python-language-server/blob/0.36.2/pyls/plugins/pylint_lint.py#L52-L59
-last_diagnostics : Dict[str, List] = collections.defaultdict(list)
+last_diagnostics: Dict[str, List] = collections.defaultdict(list)
+
+# (~Hack) was having issues where mypy was being run on outdated file contents,
+# so we add an extra check for file modification times
+last_updated: Dict[str, float] = {}
 
 def parse_line(line: str, document: Optional[Document] = None) -> Optional[Dict[str, Any]]:
     """
@@ -140,6 +144,8 @@ def pyls_lint(config: Config, workspace: Workspace, document: Document,
     if prepend:
         args = prepend + args
 
+    modified_time = os.path.getmtime(document.path)
+
     global tmpFile
     if live_mode and not is_saved and tmpFile:
         log.info("live_mode tmpFile = %s", live_mode)
@@ -147,7 +153,11 @@ def pyls_lint(config: Config, workspace: Workspace, document: Document,
         tmpFile.write(document.source)
         tmpFile.close()
         args.extend(['--shadow-file', document.path, tmpFile.name])
-    elif not is_saved and document.path in last_diagnostics:
+    elif (
+        not is_saved
+        and document.path in last_diagnostics
+        and last_updated[document.path] == modified_time
+    ):
         # On-launch the document isn't marked as saved, so fall through and run
         # the diagnostics anyway even if the file contents may be out of date.
         log.info(
@@ -155,6 +165,8 @@ def pyls_lint(config: Config, workspace: Workspace, document: Document,
             last_diagnostics[document.path]
         )
         return last_diagnostics[document.path]
+
+    last_updated[document.path] = modified_time
 
     if mypyConfigFile:
         args.append('--config-file')
