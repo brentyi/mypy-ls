@@ -136,6 +136,10 @@ def pyls_lint(config: Config, workspace: Workspace, document: Document,
 
     args = ['--show-column-numbers']
 
+    prepend = settings.get('prepend')
+    if prepend:
+        args = prepend + args
+
     global tmpFile
     if live_mode and not is_saved and tmpFile:
         log.info("live_mode tmpFile = %s", live_mode)

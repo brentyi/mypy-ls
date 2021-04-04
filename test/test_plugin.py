@@ -1,10 +1,9 @@
 import pytest
-
-from pyls.workspace import Workspace, Document
-from pyls.config.config import Config
-from pyls import uris
 from mock import Mock
 from mypy_ls import plugin
+from pyls import uris
+from pyls.config.config import Config
+from pyls.workspace import Document, Workspace
 
 DOC_URI = __file__
 DOC_TYPE_ERR = """{}.append(3)
@@ -87,3 +86,40 @@ def test_parse_line_with_context(monkeypatch, word, bounds, workspace):
     assert diag['message'] == '"Request" has no attribute "id"'
     assert diag['range']['start'] == {'line': 278, 'character': bounds[0]}
     assert diag['range']['end'] == {'line': 278, 'character': bounds[1]}
+
+
+
+def test_option_prepend(tmpdir, monkeypatch):
+    import sys
+    from textwrap import dedent
+
+    sentinel = tmpdir / 'ran'
+
+    source = dedent(
+        """\
+        #!/bin/sh
+        touch {}
+        exec {} "$@"
+        """
+    ).format(sentinel, sys.executable)
+
+    wrapper = tmpdir / 'bin/wrapper'
+    wrapper.write(source, ensure=True)
+    wrapper.chmod(0o700)
+
+    monkeypatch.setattr(
+        FakeConfig,
+        'plugin_settings',
+        lambda *_: {'prepend': ['--python-executable', wrapper.strpath]}
+    )
+
+    assert not sentinel.exists()
+    diags = plugin.pyls_lint(
+        config=FakeConfig(),
+        workspace=None,
+        document=Document(DOC_URI, DOC_TYPE_ERR),
+        is_saved=False,
+    )
+    assert len(diags) == 1
+    assert sentinel.exists()
+    assert sentinel.exists()

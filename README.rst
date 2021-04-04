@@ -22,6 +22,7 @@ Install into the same virtualenv as pyls itself.
 Configuration
 -------------
 
+``prepend`` (default is ``[]``) list of additional command-line options to prepend
 ``live_mode`` (default is True) provides type checking as you type. This writes to a tempfile every time a check is done.
 
 Turning off live_mode means you must save your changes for mypy diagnostics to update correctly.
@@ -34,6 +35,7 @@ Depending on your editor, the configuration (found in a file called mypy-ls.cfg 
 	"enabled": True,
 	"live_mode": True,
 	"strict": False
+	"prepend": ["--python-executable", "/tmp/foo/bin/python"]
     }
 
 ``dmypy`` (default is False) executes via `dmypy run` rather than `mypy`.
@@ -48,5 +50,6 @@ Depending on your editor, the configuration (found in a file called mypy-ls.cfg 
 	"enabled": True,
 	"live_mode": False,
 	"dmypy": True,
-	"strict": False
+	"strict": False,
+	"prepend": ["--python-executable", "/tmp/foo/bin/python"]
     }
