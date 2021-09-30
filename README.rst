@@ -25,6 +25,7 @@ Configuration
 -------------
 
 ``prepend`` (default is ``[]``) list of additional command-line options to prepend
+
 ``live_mode`` (default is True) provides type checking as you type.
     This writes to a tempfile every time a check is done. Turning off ``live_mode`` means you must save your changes for mypy diagnostics to update correctly.
 
