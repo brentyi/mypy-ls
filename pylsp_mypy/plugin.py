@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-File that contains the pyls plugin mypy-ls.
+File that contains the python-lsp-server plugin pylsp-mypy.
 
 Created on Fri Jul 10 09:53:57 2020
 
@@ -13,18 +13,21 @@ import os
 import os.path
 import re
 import tempfile
+import warnings
+from pathlib import Path
 from typing import IO, Any, Dict, List, Optional
 
 from mypy import api as mypy_api
-from pyls import hookimpl
-from pyls.config.config import Config
-from pyls.workspace import Document, Workspace
+from pylsp import hookimpl
+from pylsp.config.config import Config
+from pylsp.workspace import Document, Workspace
 
 line_pattern: str = r"((?:^[a-z]:)?[^:]+):(?:(\d+):)?(?:(\d+):)? (\w+): (.*)"
 
 log = logging.getLogger(__name__)
 
-mypyConfigFile: Optional[str] = None
+# A mapping from workspace path to config file path
+mypyConfigFileMap: Dict[str, Optional[str]] = {}
 
 tmpFile: Optional[IO[str]] = None
 
@@ -32,12 +35,8 @@ tmpFile: Optional[IO[str]] = None
 # Returning an empty diagnostic clears the diagnostic result,
 # so store a cache of last diagnostics for each file a-la the pylint plugin,
 # so we can return some potentially-stale diagnostics.
-# https://github.com/palantir/python-language-server/blob/0.36.2/pyls/plugins/pylint_lint.py#L52-L59
-last_diagnostics: Dict[str, List] = collections.defaultdict(list)
-
-# (~Hack) was having issues where mypy was being run on outdated file contents,
-# so we add an extra check for file modification times
-last_updated: Dict[str, float] = {}
+# https://github.com/python-lsp/python-lsp-server/blob/v1.0.1/pylsp/plugins/pylint_lint.py#L55-L62
+last_diagnostics: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
 
 
 def parse_line(line: str, document: Optional[Document] = None) -> Optional[Dict[str, Any]]:
@@ -98,7 +97,7 @@ def parse_line(line: str, document: Optional[Document] = None) -> Optional[Dict[
 
 
 @hookimpl
-def pyls_lint(
+def pylsp_lint(
     config: Config, workspace: Workspace, document: Document, is_saved: bool
 ) -> List[Dict[str, Any]]:
     """
@@ -107,9 +106,9 @@ def pyls_lint(
     Parameters
     ----------
     config : Config
-        The pyls config.
+        The pylsp config.
     workspace : Workspace
-        The pyls workspace.
+        The pylsp workspace.
     document : Document
         The document to be linted.
     is_saved : bool
@@ -121,9 +120,31 @@ def pyls_lint(
         List of the linting data.
 
     """
-    settings = config.plugin_settings("mypy-ls")
+    settings = config.plugin_settings("pylsp_mypy")
+    oldSettings1 = config.plugin_settings("mypy-ls")
+    if oldSettings1 != {}:
+        warnings.warn(
+            DeprecationWarning(
+                "Your configuration uses the namespace mypy-ls, this should be changed to pylsp_mypy"
+            )
+        )
+    oldSettings2 = config.plugin_settings("mypy_ls")
+    if oldSettings2 != {}:
+        warnings.warn(
+            DeprecationWarning(
+                "Your configuration uses the namespace mypy_ls, this should be changed to pylsp_mypy"
+            )
+        )
+    if settings == {}:
+        settings = oldSettings1
+        if settings == {}:
+            settings = oldSettings2
+
     log.info(
-        "lint settings = %s document.path = %s is_saved = %s", settings, document.path, is_saved
+        "lint settings = %s document.path = %s is_saved = %s",
+        settings,
+        document.path,
+        is_saved,
     )
 
     live_mode = settings.get("live_mode", True)
@@ -137,24 +158,17 @@ def pyls_lint(
 
     args = ["--show-column-numbers"]
 
-    prepend = settings.get("prepend")
-    if prepend:
-        args = prepend + args
-
-    modified_time = os.path.getmtime(document.path)
-
     global tmpFile
-    if live_mode and not is_saved and tmpFile:
-        log.info("live_mode tmpFile = %s", live_mode)
-        tmpFile = open(tmpFile.name, "w")
+    if live_mode and not is_saved:
+        if tmpFile:
+            tmpFile = open(tmpFile.name, "w")
+        else:
+            tmpFile = tempfile.NamedTemporaryFile("w", delete=False)
+        log.info("live_mode tmpFile = %s", tmpFile.name)
         tmpFile.write(document.source)
         tmpFile.close()
         args.extend(["--shadow-file", document.path, tmpFile.name])
-    elif (
-        not is_saved
-        and document.path in last_diagnostics
-        and last_updated[document.path] == modified_time
-    ):
+    elif not is_saved and document.path in last_diagnostics:
         # On-launch the document isn't marked as saved, so fall through and run
         # the diagnostics anyway even if the file contents may be out of date.
         log.info(
@@ -163,8 +177,7 @@ def pyls_lint(
         )
         return last_diagnostics[document.path]
 
-    last_updated[document.path] = modified_time
-
+    mypyConfigFile = mypyConfigFileMap.get(workspace.root_path)
     if mypyConfigFile:
         args.append("--config-file")
         args.append(mypyConfigFile)
@@ -177,39 +190,49 @@ def pyls_lint(
     if not dmypy:
         args.extend(["--incremental", "--follow-imports", "silent"])
 
-        log.info(f"executing mypy {args=}")
+        log.info("executing mypy args = %s", args)
         report, errors, _ = mypy_api.run(args)
     else:
-        args = ["run", "--"] + args
+        # If dmypy daemon is non-responsive calls to run will block.
+        # Check daemon status, if non-zero daemon is dead or hung.
+        # If daemon is hung, kill will reset
+        # If daemon is dead/absent, kill will no-op.
+        # In either case, reset to fresh state
+        _, _err, _status = mypy_api.run_dmypy(["status"])
+        if _status != 0:
+            log.info("restarting dmypy from status: %s message: %s", _status, _err.strip())
+            mypy_api.run_dmypy(["kill"])
 
-        log.info(f"executing dmypy {args=}")
+        # run to use existing daemon or restart if required
+        args = ["run", "--"] + args
+        log.info("dmypy run args = %s", args)
         report, errors, _ = mypy_api.run_dmypy(args)
 
-    log.debug("report: \n" + report)
-    log.debug("errors: \n" + errors)
+    log.debug("report:\n%s", report)
+    log.debug("errors:\n%s", errors)
 
     diagnostics = []
     for line in report.splitlines():
-        log.debug(f"parsing: {line=}")
+        log.debug("parsing: line = %r", line)
         diag = parse_line(line, document)
         if diag:
             diagnostics.append(diag)
 
-    logging.info("mypy-ls len(diagnostics) = %s", len(diagnostics))
+    log.info("pylsp-mypy len(diagnostics) = %s", len(diagnostics))
 
     last_diagnostics[document.path] = diagnostics
     return diagnostics
 
 
 @hookimpl
-def pyls_settings(config: Config) -> Dict[str, Dict[str, Dict[str, str]]]:
+def pylsp_settings(config: Config) -> Dict[str, Dict[str, Dict[str, str]]]:
     """
     Read the settings.
 
     Parameters
     ----------
     config : Config
-        The pyls config.
+        The pylsp config.
 
     Returns
     -------
@@ -218,7 +241,7 @@ def pyls_settings(config: Config) -> Dict[str, Dict[str, Dict[str, str]]]:
 
     """
     configuration = init(config._root_path)
-    return {"plugins": {"mypy-ls": configuration}}
+    return {"plugins": {"pylsp_mypy": configuration}}
 
 
 def init(workspace: str) -> Dict[str, str]:
@@ -236,33 +259,22 @@ def init(workspace: str) -> Dict[str, str]:
         The plugin config dict.
 
     """
-    # On windows the path contains \\ on linux it contains / all the code works with /
-    log.info(f"init {workspace=}")
-    workspace = workspace.replace("\\", "/")
+    log.info("init workspace = %s", workspace)
 
     configuration = {}
-    path = findConfigFile(workspace, "mypy-ls.cfg")
+    path = findConfigFile(workspace, ["pylsp-mypy.cfg", "mypy-ls.cfg", "mypy_ls.cfg"])
     if path:
         with open(path) as file:
             configuration = eval(file.read())
 
-    global mypyConfigFile
-    mypyConfigFile = findConfigFile(workspace, "mypy.ini")
-    if not mypyConfigFile:
-        mypyConfigFile = findConfigFile(workspace, ".mypy.ini")
+    mypyConfigFile = findConfigFile(workspace, ["mypy.ini", ".mypy.ini"])
+    mypyConfigFileMap[workspace] = mypyConfigFile
 
-    if ("enabled" not in configuration or configuration["enabled"]) and (
-        "live_mode" not in configuration or configuration["live_mode"]
-    ):
-        global tmpFile
-        tmpFile = tempfile.NamedTemporaryFile("w", delete=False)
-        tmpFile.close()
-
-    log.info(f"{mypyConfigFile=} {configuration=}")
+    log.info("mypyConfigFile = %s configuration = %s", mypyConfigFile, configuration)
     return configuration
 
 
-def findConfigFile(path: str, name: str) -> Optional[str]:
+def findConfigFile(path: str, names: List[str]) -> Optional[str]:
     """
     Search for a config file.
 
@@ -273,8 +285,8 @@ def findConfigFile(path: str, name: str) -> Optional[str]:
     ----------
     path : str
         The path where the search starts.
-    name : str
-        The file to be found.
+    names : List[str]
+        The file to be found (or alternative names).
 
     Returns
     -------
@@ -282,15 +294,21 @@ def findConfigFile(path: str, name: str) -> Optional[str]:
         The path where the file has been found or None if no matching file has been found.
 
     """
-    while True:
-        p = f"{path}/{name}"
-        if os.path.isfile(p):
-            return p
-        else:
-            loc = path.rfind("/")
-            if loc == -1:
-                return None
-            path = path[:loc]
+    start = Path(path).joinpath(names[0])  # the join causes the parents to include path
+    for parent in start.parents:
+        for name in names:
+            file = parent.joinpath(name)
+            if file.is_file():
+                if file.name in ["mypy-ls.cfg", "mypy_ls.cfg"]:
+                    warnings.warn(
+                        DeprecationWarning(
+                            f"{str(file)}: {file.name} is no longer supported, you should rename your "
+                            "config file to pylsp-mypy.cfg"
+                        )
+                    )
+                return str(file)
+
+    return None
 
 
 @atexit.register
