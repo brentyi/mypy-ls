@@ -165,9 +165,14 @@ def pyls_lint(
 
     last_updated[document.path] = modified_time
 
+    colocate_cache_with_config = settings.get("colocate_cache_with_config")
+
     if mypyConfigFile:
         args.append("--config-file")
         args.append(mypyConfigFile)
+
+        if colocate_cache_with_config:
+            args.append("--cache-dir", os.path.join(os.path.dirname(mypyConfigFile), ".mypy_cache/"))
 
     args.append(document.path)
 

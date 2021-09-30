@@ -72,6 +72,10 @@ With ``dmypy`` enabled your config should look like this:
         "strict": False
     }
 
+``colocate_cache_with_config`` (default is False) co-locates the mypy cache with
+the config file via the `--cache-dir` flag. This reduces redundancy for projects
+with many different subdirectories.
+
 Developing
 -------------
 
