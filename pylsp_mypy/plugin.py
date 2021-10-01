@@ -38,6 +38,10 @@ tmpFile: Optional[IO[str]] = None
 # https://github.com/python-lsp/python-lsp-server/blob/v1.0.1/pylsp/plugins/pylint_lint.py#L55-L62
 last_diagnostics: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
 
+# (~Hack) was having issues where mypy was being run on outdated file contents,
+# so we add an extra check for file modification times
+last_updated: Dict[str, float] = {}
+
 
 def parse_line(line: str, document: Optional[Document] = None) -> Optional[Dict[str, Any]]:
     """
@@ -158,6 +162,12 @@ def pylsp_lint(
 
     args = ["--show-column-numbers"]
 
+    prepend = settings.get("prepend")
+    if prepend:
+        args = prepend + args
+
+    modified_time = os.path.getmtime(document.path)
+
     global tmpFile
     if live_mode and not is_saved:
         if tmpFile:
@@ -168,7 +178,11 @@ def pylsp_lint(
         tmpFile.write(document.source)
         tmpFile.close()
         args.extend(["--shadow-file", document.path, tmpFile.name])
-    elif not is_saved and document.path in last_diagnostics:
+    elif (
+        not is_saved
+        and document.path in last_diagnostics
+        and last_updated[document.path] == modified_time
+    ):
         # On-launch the document isn't marked as saved, so fall through and run
         # the diagnostics anyway even if the file contents may be out of date.
         log.info(
@@ -177,10 +191,19 @@ def pylsp_lint(
         )
         return last_diagnostics[document.path]
 
+    last_updated[document.path] = modified_time
+
+    colocate_cache_with_config = settings.get("colocate_cache_with_config")
+
     mypyConfigFile = mypyConfigFileMap.get(workspace.root_path)
     if mypyConfigFile:
         args.append("--config-file")
         args.append(mypyConfigFile)
+
+        if colocate_cache_with_config:
+            args.extend(
+                ["--cache-dir", os.path.join(os.path.dirname(mypyConfigFile), ".mypy_cache/")]
+            )
 
     args.append(document.path)
 
