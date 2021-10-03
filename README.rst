@@ -36,9 +36,7 @@ Configuration
 ``strict`` (default is False) refers to the ``strict`` option of ``mypy``.
     This option often is too strict to be useful.
     
-
-``colocate_cache_with_config`` (default is False) co-locates the mypy cache with
-the config file via the `--cache-dir` flag.
+``colocate_cache_with_config`` (default is False) co-locates the mypy cache with the config file via the `--cache-dir` flag.
     This reduces redundancy for projects with many different subdirectories.
 
 Depending on your editor, the configuration (found in a file called pylsp-mypy.cfg in your workspace or a parent directory) should be roughly like this for a standard configuration:
