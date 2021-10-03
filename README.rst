@@ -24,7 +24,8 @@ Install into the same virtualenv as python-lsp-server itself.
 Configuration
 -------------
 
-``prepend`` (default is ``[]``) list of additional command-line options to prepend
+``prepend`` (default is ``[]``) takes a list of additional command-line options to prepend.
+    This is useful for passing in arbitrary options to mypy, such as the correct Python executable for virtual environments.
 
 ``live_mode`` (default is True) provides type checking as you type.
     This writes to a tempfile every time a check is done. Turning off ``live_mode`` means you must save your changes for mypy diagnostics to update correctly.
@@ -34,6 +35,11 @@ Configuration
 
 ``strict`` (default is False) refers to the ``strict`` option of ``mypy``.
     This option often is too strict to be useful.
+    
+
+``colocate_cache_with_config`` (default is False) co-locates the mypy cache with
+the config file via the `--cache-dir` flag.
+    This reduces redundancy for projects with many different subdirectories.
 
 Depending on your editor, the configuration (found in a file called pylsp-mypy.cfg in your workspace or a parent directory) should be roughly like this for a standard configuration:
 
@@ -42,40 +48,9 @@ Depending on your editor, the configuration (found in a file called pylsp-mypy.c
     {
 	"enabled": True,
 	"live_mode": True,
-	"strict": False
-	"prepend": ["--python-executable", "/tmp/foo/bin/python"]
-    }
-
-``dmypy`` (default is False) executes via `dmypy run` rather than `mypy`.
-
-This uses the `dmypy` daemon and may dramatically improve the responsiveness of the `pyls` server.
-
-Depending on your editor, the configuration (found in a file called mypy-ls.cfg in your workspace or a parent directory) should be roughly like this:
-
-::
-
-    {
-	"enabled": True,
-	"live_mode": False,
-	"dmypy": True,
 	"strict": False,
 	"prepend": ["--python-executable", "/tmp/foo/bin/python"]
     }
-
-With ``dmypy`` enabled your config should look like this:
-
-::
-
-    {
-        "enabled": True,
-        "live_mode": False,
-        "dmypy": True,
-        "strict": False
-    }
-
-``colocate_cache_with_config`` (default is False) co-locates the mypy cache with
-the config file via the `--cache-dir` flag. This reduces redundancy for projects
-with many different subdirectories.
 
 Developing
 -------------
